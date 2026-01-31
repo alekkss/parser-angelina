@@ -1,13 +1,15 @@
 import os
 import time
-import asyncio
+import pickle  # Добавь этот импорт в начало файла
 import pandas as pd
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
+
 # Загрузка переменных окружения из .env файла
-load_dotenv()
+load_dotenv(override=True)
+
 
 # --- Настраиваемые параметры из .env ---
 LOGIN_URL = os.getenv("LOGIN_URL", "https://lk.eutd.ru/login")
@@ -15,17 +17,20 @@ NOMENCLATURES_URL = os.getenv("NOMENCLATURES_URL", "https://lk.eutd.ru/nomenclat
 EMAIL = os.getenv("APP_EMAIL")
 PASSWORD = os.getenv("APP_PASSWORD")
 
+
 # Параметры ожидания
 POST_LOGIN_WAIT = int(os.getenv("POST_LOGIN_WAIT", "10"))
 POST_NAVIGATION_WAIT = int(os.getenv("POST_NAVIGATION_WAIT", "20"))
-PAGE_TIMEOUT = int(os.getenv("PAGE_TIMEOUT", "60000"))  # в миллисекундах
+PAGE_TIMEOUT = int(os.getenv("PAGE_TIMEOUT", "60000"))
+
 
 # Файлы
 COOKIES_FILE = os.getenv("COOKIES_FILE", "session_cookies.json")
 OUTPUT_EXCEL = os.getenv("OUTPUT_EXCEL", "table_container_html.xlsx")
-TEMP_EXCEL = os.getenv("TEMP_EXCEL", "temp_table_container_html.xlsx")
+TEMP_DATA = os.getenv("TEMP_DATA", "temp_parsing_data.pkl")  # Изменено на pickle
 LAST_POSITION_FILE = os.getenv("LAST_POSITION_FILE", "last_position.txt")
 FINAL_EXCEL = os.getenv("FINAL_EXCEL", "результат.xlsx")
+
 
 # Параметры прокрутки
 SCROLL_STEP = int(os.getenv("SCROLL_STEP", "800"))
@@ -34,19 +39,23 @@ CHECK_PAUSE = int(os.getenv("CHECK_PAUSE", "5"))
 MAX_SCROLL_POSITION = int(os.getenv("MAX_SCROLL_POSITION", "725000"))
 RESTART_THRESHOLD = int(os.getenv("RESTART_THRESHOLD", "100000"))
 
+
 # Браузерные настройки
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
 USER_AGENT = os.getenv("USER_AGENT", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.7049.52 Safari/537.36")
 
+
 # Проверка обязательных переменных
 if not EMAIL or not PASSWORD:
-    raise ValueError("⚠️ EMAIL и PASSWORD должны быть указаны в .env файле!")
+    raise ValueError("⚠️ APP_EMAIL и APP_PASSWORD должны быть указаны в .env файле!")
+
 
 print(f"🔧 Настройки загружены:")
 print(f"   📧 Email: {EMAIL}")
 print(f"   🌐 Login URL: {LOGIN_URL}")
 print(f"   📋 Nomenclatures URL: {NOMENCLATURES_URL}")
 print(f"   👁️ Headless режим: {HEADLESS}")
+
 
 
 # --- Функция чтения последней позиции прокрутки ---
@@ -62,6 +71,7 @@ def get_last_position():
     return 0
 
 
+
 # --- Функция сохранения последней позиции прокрутки ---
 def save_last_position(position):
     """Сохраняет текущую позицию прокрутки в файл"""
@@ -70,44 +80,81 @@ def save_last_position(position):
     print(f"💾 Сохранена последняя позиция прокрутки: {position}px")
 
 
-# --- Функция сохранения данных в промежуточный Excel ---
-def save_temp_excel(data_to_save):
-    """Сохраняет промежуточные данные в Excel файл"""
+
+# --- Функция сохранения данных в промежуточный файл (PICKLE) ---
+def save_temp_data(data_to_save):
+    """Сохраняет промежуточные данные в pickle файл"""
     try:
-        df = pd.DataFrame(data_to_save)
-        df.to_excel(TEMP_EXCEL, index=False, engine="openpyxl")
-        print(f"💾 Промежуточные данные сохранены в файл: {TEMP_EXCEL}")
+        with open(TEMP_DATA, 'wb') as f:
+            pickle.dump(data_to_save, f)
+        print(f"💾 Промежуточные данные сохранены в файл: {TEMP_DATA} ({len(data_to_save)} записей)")
     except Exception as e:
-        print(f"❌ Ошибка при сохранении в промежуточный Excel: {e}")
+        print(f"❌ Ошибка при сохранении промежуточных данных: {e}")
 
 
-# --- Функция объединения данных из промежуточного Excel в итоговый ---
+
+# --- Функция загрузки промежуточных данных ---
+def load_temp_data():
+    """Загружает промежуточные данные из pickle файла"""
+    try:
+        if os.path.exists(TEMP_DATA):
+            with open(TEMP_DATA, 'rb') as f:
+                data = pickle.load(f)
+            print(f"📂 Загружены промежуточные данные: {len(data)} записей")
+            return data
+        return []
+    except Exception as e:
+        print(f"⚠️ Ошибка при загрузке промежуточных данных: {e}")
+        return []
+
+
+
+# --- Функция объединения данных из промежуточного файла в итоговый ---
 def merge_temp_to_final():
     """Объединяет данные из временного файла с итоговым"""
-    if os.path.exists(TEMP_EXCEL):
+    if os.path.exists(TEMP_DATA):
         try:
-            temp_df = pd.read_excel(TEMP_EXCEL, engine="openpyxl")
+            data_list = load_temp_data()
+            
+            if not data_list:
+                print("⚠️ Нет данных для объединения")
+                return
+            
+            # Собираем весь HTML
+            all_html = []
+            for item in data_list:
+                all_html.append(item['html_content'])
+            
+            # Создаем DataFrame
+            df = pd.DataFrame({
+                'html_content': all_html
+            })
+            
+            # Сохраняем в Excel (теперь каждая строка - отдельный HTML блок)
             if os.path.exists(OUTPUT_EXCEL):
-                final_df = pd.read_excel(OUTPUT_EXCEL, engine="openpyxl")
-                combined_df = pd.concat([final_df, temp_df]).drop_duplicates().reset_index(drop=True)
+                existing_df = pd.read_excel(OUTPUT_EXCEL, engine="openpyxl")
+                combined_df = pd.concat([existing_df, df]).drop_duplicates().reset_index(drop=True)
             else:
-                combined_df = temp_df
+                combined_df = df
+            
             combined_df.to_excel(OUTPUT_EXCEL, index=False, engine="openpyxl")
             print(f"✅ Данные объединены в итоговый файл: {OUTPUT_EXCEL}")
         except Exception as e:
             print(f"❌ Ошибка при объединении данных: {e}")
 
 
+
 # --- Функция удаления временных файлов ---
 def clear_temp_files():
     """Удаляет все временные файлы"""
-    for file in [COOKIES_FILE, TEMP_EXCEL, LAST_POSITION_FILE]:
+    for file in [COOKIES_FILE, TEMP_DATA, LAST_POSITION_FILE]:  # Убрал OUTPUT_EXCEL
         if os.path.exists(file):
             try:
                 os.remove(file)
                 print(f"🗑️ Удален файл: {file}")
             except Exception as e:
                 print(f"⚠️ Ошибка при удалении файла {file}: {e}")
+
 
 
 # --- Функция удаления folder_container из DOM ---
@@ -128,6 +175,7 @@ def remove_folder_container(page):
         print(f"⚠️ Ошибка при удалении folder_container: {e}")
 
 
+
 # --- Функция обработки HTML и создания финального Excel ---
 def process_html_to_excel(input_file=None, output_file=None):
     """Обрабатывает HTML из промежуточного файла и создает финальный Excel"""
@@ -138,8 +186,19 @@ def process_html_to_excel(input_file=None, output_file=None):
         
     print(f"🔄 Обработка HTML из {input_file} и создание финального файла {output_file}...")
     try:
+        # Проверяем существование файла
+        if not os.path.exists(input_file):
+            print(f"⚠️ Файл {input_file} не найден, пробуем загрузить из pickle...")
+            data_list = load_temp_data()
+            if not data_list:
+                print("❌ Нет данных для обработки")
+                return
+            # Создаем временный Excel
+            df = pd.DataFrame({'html_content': [item['html_content'] for item in data_list]})
+            df.to_excel(input_file, index=False, engine="openpyxl")
+        
         df = pd.read_excel(input_file, engine="openpyxl")
-        html_column = df.iloc[:, 1]
+        html_column = df.iloc[:, 0] if df.shape[1] == 1 else df.iloc[:, 1]
         
         data = {
             'Код номенклатуры': [],
@@ -226,18 +285,17 @@ def process_html_to_excel(input_file=None, output_file=None):
             # Объединяем старые (без обновляемых) и новые данные
             result_df = pd.concat([existing_df, new_df], ignore_index=True)
             
-            # Удаляем полные дубликаты (на всякий случай)
+            # Удаляем полные дубликаты
             result_df = result_df.drop_duplicates(subset=['Код номенклатуры'], keep='last')
             
             print(f"✅ Итого записей в финальном файле: {len(result_df)}")
         else:
             print(f"📄 Создается новый файл {output_file}")
             result_df = new_df
-            # Удаляем дубликаты в новых данных (если есть)
             result_df = result_df.drop_duplicates(subset=['Код номенклатуры'], keep='last')
             print(f"✅ Всего записей: {len(result_df)}")
         
-        # Сортировка по коду номенклатуры для удобства
+        # Сортировка по коду номенклатуры
         result_df = result_df.sort_values('Код номенклатуры').reset_index(drop=True)
         
         # Сохранение результата
@@ -253,6 +311,7 @@ def process_html_to_excel(input_file=None, output_file=None):
         traceback.print_exc()
 
 
+
 # --- Функция медленной прокрутки контейнера main_content_container ---
 def scroll_to_load_table_container(page, start_position=0, scroll_step=None, max_empty_attempts=10000):
     """Постепенно прокручивает страницу и собирает данные"""
@@ -265,18 +324,15 @@ def scroll_to_load_table_container(page, start_position=0, scroll_step=None, max
     empty_attempts = 0
     scroll_position = start_position
     
-    # Загрузка уже сохранённых id
-    if os.path.exists(TEMP_EXCEL):
-        try:
-            temp_df = pd.read_excel(TEMP_EXCEL, engine="openpyxl")
-            data_to_save = temp_df.to_dict("records")
-            for html_content in temp_df['html_content']:
-                soup = BeautifulSoup(html_content, 'html.parser')
-                for tr in soup.find_all('tr', id=True):
-                    seen_ids.add(tr['id'])
-            print(f"📂 Загружено {len(seen_ids)} уникальных id из TEMP_EXCEL")
-        except Exception as e:
-            print(f"⚠️ Ошибка при загрузке TEMP_EXCEL: {e}")
+    # Загрузка уже сохранённых данных
+    data_to_save = load_temp_data()
+    for item in data_to_save:
+        soup = BeautifulSoup(item['html_content'], 'html.parser')
+        for tr in soup.find_all('tr', id=True):
+            seen_ids.add(tr['id'])
+    
+    if seen_ids:
+        print(f"📂 Загружено {len(seen_ids)} уникальных id из сохраненных данных")
     
     # Проверка наличия контейнера
     try:
@@ -343,7 +399,7 @@ def scroll_to_load_table_container(page, start_position=0, scroll_step=None, max
             
             # Сохраняем промежуточные данные каждые 50 новых записей
             if len(data_to_save) % 50 == 0:
-                save_temp_excel(data_to_save)
+                save_temp_data(data_to_save)
                 save_last_position(scroll_position)
         else:
             empty_attempts += 1
@@ -363,7 +419,7 @@ def scroll_to_load_table_container(page, start_position=0, scroll_step=None, max
     
     # Финальное сохранение данных
     if data_to_save:
-        save_temp_excel(data_to_save)
+        save_temp_data(data_to_save)
         merge_temp_to_final()
         save_last_position(scroll_position)
         print(f"✅ Сбор данных завершен. Всего собрано {len(seen_ids)} уникальных записей.")
@@ -371,30 +427,26 @@ def scroll_to_load_table_container(page, start_position=0, scroll_step=None, max
     return len(seen_ids)
 
 
+
 # --- Основная функция авторизации ---
 def login_and_navigate(page):
     """Выполняет авторизацию и переход на страницу номенклатур"""
     try:
-        # Переход на страницу входа
         print("🌐 Переход на страницу входа...")
         page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT)
         
-        # Ожидание загрузки формы входа и ввод данных
         print("📝 Заполнение формы авторизации...")
         page.wait_for_selector('input[name="email"]', timeout=10000)
         
         page.fill('input[name="email"]', EMAIL)
         page.fill('input[name="password"]', PASSWORD)
         
-        # Нажатие кнопки входа
         print("🔐 Отправка данных авторизации...")
         page.click('button[type="submit"]')
         
-        # Ожидание после входа
         print(f"⏳ Ожидание {POST_LOGIN_WAIT} секунд после авторизации...")
         time.sleep(POST_LOGIN_WAIT)
         
-        # Переход на страницу номенклатур
         print("📋 Переход на страницу номенклатур...")
         page.goto(NOMENCLATURES_URL, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT)
         
@@ -412,6 +464,7 @@ def login_and_navigate(page):
         return False
 
 
+
 # --- Функция сохранения cookies ---
 def save_cookies(context):
     """Сохраняет cookies в файл"""
@@ -423,6 +476,7 @@ def save_cookies(context):
         print(f"💾 Cookies сохранены в {COOKIES_FILE}")
     except Exception as e:
         print(f"⚠️ Ошибка при сохранении cookies: {e}")
+
 
 
 # --- Функция загрузки cookies ---
@@ -441,6 +495,7 @@ def load_cookies(context):
     return False
 
 
+
 # --- Главная функция ---
 def main():
     """Главная функция программы"""
@@ -449,7 +504,6 @@ def main():
     print("="*60)
     
     with sync_playwright() as p:
-        # Запуск браузера
         print(f"🌐 Запуск браузера (headless={HEADLESS})...")
         browser = p.chromium.launch(
             headless=HEADLESS,
@@ -460,37 +514,28 @@ def main():
             ]
         )
         
-        # Создание контекста браузера с настройками
         context = browser.new_context(
             viewport={'width': 1920, 'height': 1080},
             user_agent=USER_AGENT,
             ignore_https_errors=True
         )
         
-        # Создание новой страницы
         page = context.new_page()
         page.set_default_timeout(PAGE_TIMEOUT)
         
         try:
-            # Попытка загрузить cookies
             cookies_loaded = load_cookies(context)
             
-            # Авторизация
             if not login_and_navigate(page):
                 print("❌ Не удалось авторизоваться. Завершение работы.")
                 return
             
-            # Сохранение cookies после успешной авторизации
             save_cookies(context)
-            
-            # Удаление folder_container элементов
             remove_folder_container(page)
             
-            # Получение последней позиции прокрутки
             start_position = get_last_position()
             print(f"📍 Начинаем с позиции: {start_position}px")
             
-            # Запуск процесса сбора данных
             print("="*60)
             print("📊 НАЧАЛО СБОРА ДАННЫХ")
             print("="*60)
@@ -500,7 +545,6 @@ def main():
             print(f"✅ Сбор данных завершен. Всего собрано {total_records} записей.")
             print("="*60)
             
-            # Обработка собранных данных
             print("🔄 Начинаем обработку собранных данных...")
             process_html_to_excel()
             print("="*60)
@@ -516,11 +560,11 @@ def main():
             import traceback
             traceback.print_exc()
         finally:
-            # Закрытие браузера
             print("🛑 Закрытие браузера...")
             context.close()
             browser.close()
             print("✅ Браузер закрыт.")
+
 
 
 if __name__ == "__main__":
