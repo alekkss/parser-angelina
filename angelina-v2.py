@@ -12,8 +12,8 @@ load_dotenv()
 # --- Настраиваемые параметры из .env ---
 LOGIN_URL = os.getenv("LOGIN_URL", "https://lk.eutd.ru/login")
 NOMENCLATURES_URL = os.getenv("NOMENCLATURES_URL", "https://lk.eutd.ru/nomenclatures")
-EMAIL = os.getenv("EMAIL")
-PASSWORD = os.getenv("PASSWORD")
+EMAIL = os.getenv("APP_EMAIL")
+PASSWORD = os.getenv("APP_PASSWORD")
 
 # Параметры ожидания
 POST_LOGIN_WAIT = int(os.getenv("POST_LOGIN_WAIT", "10"))
