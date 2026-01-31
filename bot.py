@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Токен бота
-BOT_TOKEN = "8355347947:AAFxrMBymwnkx-sXhPGMnq4_uqnOjojD_5w"
+BOT_TOKEN = os.getenv("API_BOT")
 
 # Пути к файлам
 BASE_DIR = "/root/Angelina"
@@ -180,11 +180,8 @@ async def cmd_start(message: Message, state: FSMContext):
     
     welcome_text = (
         "👋 <b>Добро пожаловать в бот управления парсингом!</b>\n\n"
-        f"📺 Tmux сессия: <code>{TMUX_SESSION}</code> - {session_status}\n"
-        f"📂 Директория: <code>{BASE_DIR}</code>\n\n"
         "🔹 <b>Запустить парсинг</b> - начать сбор данных в tmux сессии\n"
         "🔹 <b>Удалить прошлый файл</b> - очистить результаты\n\n"
-        f"💡 <i>Подключиться к процессу:</i> <code>tmux attach -t {TMUX_SESSION}</code>\n\n"
         "📊 Выберите действие:"
     )
     
@@ -210,9 +207,9 @@ async def start_parsing(message: Message, state: FSMContext):
     
     # Проверяем существование tmux сессии
     if not check_tmux_session_exists():
-        status_info = f"📺 Создаю tmux сессию <code>{TMUX_SESSION}</code>...\n\n"
+        status_info = f"📺 Создаю tmux сессию ...\n\n"
     else:
-        status_info = f"📺 Использую существующую сессию <code>{TMUX_SESSION}</code>\n\n"
+        status_info = f"📺 Использую существующую сессию\n\n"
     
     is_parsing = True
     await state.set_state(ParsingStates.parsing)
@@ -221,8 +218,7 @@ async def start_parsing(message: Message, state: FSMContext):
     status_msg = await message.answer(
         f"🔄 <b>Запускаю парсинг...</b>\n\n"
         f"{status_info}"
-        f"⏳ Запуск программы в tmux...\n\n"
-        f"💡 Подключиться: <code>tmux attach -t {TMUX_SESSION}</code>",
+        f"⏳ Запуск программы в tmux...\n\n",
         parse_mode="HTML",
         reply_markup=get_main_keyboard(parsing=True)
     )
@@ -240,10 +236,8 @@ async def start_parsing(message: Message, state: FSMContext):
         await safe_edit_message(
             status_msg,
             f"✅ <b>Программа запущена в tmux!</b>\n\n"
-            f"📺 Сессия: <code>{TMUX_SESSION}</code>\n"
             f"🆔 PID процесса: <code>{pid}</code>\n\n"
-            f"🔄 Начинаю мониторинг...\n\n"
-            f"💡 Подключиться: <code>tmux attach -t {TMUX_SESSION}</code>",
+            f"🔄 Начинаю мониторинг...\n\n",
             parse_mode="HTML"
         )
         
@@ -310,8 +304,7 @@ async def start_parsing(message: Message, state: FSMContext):
                         f"📊 <b>Результаты парсинга</b>\n\n"
                         f"📁 Размер файла: {file_size:.2f} МБ\n"
                         f"⏱️ Время выполнения: {minutes}м {seconds}с\n"
-                        f"📅 Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
-                        f"📺 Логи в сессии: <code>tmux attach -t {TMUX_SESSION}</code>"
+                        f"📅 Дата: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
                     ),
                     parse_mode="HTML"
                 )
@@ -325,8 +318,7 @@ async def start_parsing(message: Message, state: FSMContext):
             except Exception as e:
                 await message.answer(
                     f"❌ <b>Ошибка при отправке файла:</b>\n"
-                    f"<code>{str(e)}</code>\n\n"
-                    f"Файл находится на сервере: <code>{RESULT_FILE}</code>",
+                    f"<code>{str(e)}</code>\n\n",
                     parse_mode="HTML",
                     reply_markup=get_main_keyboard()
                 )
@@ -411,9 +403,6 @@ async def parsing_in_progress(message: Message):
     """Обработчик нажатий во время парсинга"""
     await message.answer(
         "⏳ <b>Парсинг уже выполняется!</b>\n\n"
-        f"Процесс запущен в tmux сессии <code>{TMUX_SESSION}</code>\n\n"
-        f"💡 Подключиться: <code>tmux attach -t {TMUX_SESSION}</code>\n"
-        f"💡 Отключиться: <code>Ctrl+B</code>, затем <code>D</code>\n\n"
         "Вы получите файл автоматически после окончания парсинга.",
         parse_mode="HTML"
     )
@@ -433,7 +422,7 @@ async def unknown_command(message: Message):
 async def main():
     """Главная функция"""
     print("=" * 60)
-    print("🤖 TELEGRAM BOT - ANGELINA PARSER (TMUX MODE)")
+    print("🤖 TELEGRAM BOT - PARSER (TMUX MODE)")
     print("=" * 60)
     print(f"📂 Рабочая директория: {BASE_DIR}")
     print(f"🐍 Python: {PYTHON_PATH}")

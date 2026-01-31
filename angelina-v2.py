@@ -109,38 +109,6 @@ def load_temp_data():
 
 
 
-# --- Функция объединения данных из промежуточного файла в итоговый ---
-def merge_temp_to_final():
-    """Объединяет данные из временного файла с итоговым"""
-    if os.path.exists(TEMP_DATA):
-        try:
-            data_list = load_temp_data()
-            
-            if not data_list:
-                print("⚠️ Нет данных для объединения")
-                return
-            
-            # Собираем весь HTML
-            all_html = []
-            for item in data_list:
-                all_html.append(item['html_content'])
-            
-            # Создаем DataFrame
-            df = pd.DataFrame({
-                'html_content': all_html
-            })
-            
-            # Сохраняем в Excel (теперь каждая строка - отдельный HTML блок)
-            if os.path.exists(OUTPUT_EXCEL):
-                existing_df = pd.read_excel(OUTPUT_EXCEL, engine="openpyxl")
-                combined_df = pd.concat([existing_df, df]).drop_duplicates().reset_index(drop=True)
-            else:
-                combined_df = df
-            
-            combined_df.to_excel(OUTPUT_EXCEL, index=False, engine="openpyxl")
-            print(f"✅ Данные объединены в итоговый файл: {OUTPUT_EXCEL}")
-        except Exception as e:
-            print(f"❌ Ошибка при объединении данных: {e}")
 
 
 
@@ -177,28 +145,18 @@ def remove_folder_container(page):
 
 
 # --- Функция обработки HTML и создания финального Excel ---
-def process_html_to_excel(input_file=None, output_file=None):
-    """Обрабатывает HTML из промежуточного файла и создает финальный Excel"""
-    if input_file is None:
-        input_file = OUTPUT_EXCEL
+def process_html_to_excel(output_file=None):
+    """Обрабатывает HTML из pickle файла и создает финальный Excel"""
     if output_file is None:
         output_file = FINAL_EXCEL
         
-    print(f"🔄 Обработка HTML из {input_file} и создание финального файла {output_file}...")
+    print(f"🔄 Обработка HTML данных и создание файла {output_file}...")
     try:
-        # Проверяем существование файла
-        if not os.path.exists(input_file):
-            print(f"⚠️ Файл {input_file} не найден, пробуем загрузить из pickle...")
-            data_list = load_temp_data()
-            if not data_list:
-                print("❌ Нет данных для обработки")
-                return
-            # Создаем временный Excel
-            df = pd.DataFrame({'html_content': [item['html_content'] for item in data_list]})
-            df.to_excel(input_file, index=False, engine="openpyxl")
-        
-        df = pd.read_excel(input_file, engine="openpyxl")
-        html_column = df.iloc[:, 0] if df.shape[1] == 1 else df.iloc[:, 1]
+        # Загружаем данные из pickle
+        data_list = load_temp_data()
+        if not data_list:
+            print("❌ Нет данных для обработки")
+            return
         
         data = {
             'Код номенклатуры': [],
@@ -219,10 +177,12 @@ def process_html_to_excel(input_file=None, output_file=None):
                 return 0.0
         
         # Парсинг новых данных
-        print("📊 Парсинг HTML данных...")
-        for html in html_column:
-            soup = BeautifulSoup(html, 'html.parser')
+        print("📊 Парсинг HTML данных из pickle...")
+        total_html_rows = 0
+        for item in data_list:
+            soup = BeautifulSoup(item['html_content'], 'html.parser')
             rows = soup.find_all('tr', id=True)
+            total_html_rows += len(rows)
             
             for row in rows:
                 cells = row.find_all('td')
@@ -260,7 +220,7 @@ def process_html_to_excel(input_file=None, output_file=None):
         
         # Создание DataFrame с новыми данными
         new_df = pd.DataFrame(data)
-        print(f"📝 Распарсено {len(new_df)} новых записей")
+        print(f"📝 Распарсено {total_html_rows} HTML строк → {len(new_df)} записей товаров")
         
         # Проверка существования финального файла и объединение данных
         if os.path.exists(output_file):
@@ -286,14 +246,25 @@ def process_html_to_excel(input_file=None, output_file=None):
             result_df = pd.concat([existing_df, new_df], ignore_index=True)
             
             # Удаляем полные дубликаты
+            before_dedup = len(result_df)
             result_df = result_df.drop_duplicates(subset=['Код номенклатуры'], keep='last')
+            removed_dupes = before_dedup - len(result_df)
+            
+            if removed_dupes > 0:
+                print(f"🗑️ Удалено дубликатов: {removed_dupes}")
             
             print(f"✅ Итого записей в финальном файле: {len(result_df)}")
         else:
             print(f"📄 Создается новый файл {output_file}")
             result_df = new_df
+            before_dedup = len(result_df)
             result_df = result_df.drop_duplicates(subset=['Код номенклатуры'], keep='last')
-            print(f"✅ Всего записей: {len(result_df)}")
+            removed_dupes = before_dedup - len(result_df)
+            
+            if removed_dupes > 0:
+                print(f"🗑️ Удалено дубликатов по коду номенклатуры: {removed_dupes}")
+            
+            print(f"✅ Уникальных записей: {len(result_df)}")
         
         # Сортировка по коду номенклатуры
         result_df = result_df.sort_values('Код номенклатуры').reset_index(drop=True)
@@ -302,8 +273,15 @@ def process_html_to_excel(input_file=None, output_file=None):
         result_df.to_excel(output_file, index=False, engine='openpyxl')
         print(f"💾 Таблица сохранена в {output_file}")
         
+        # Статистика
+        print("\n📊 Статистика:")
+        print(f"   🔢 HTML строк собрано: {len(data_list)}")
+        print(f"   📦 Записей товаров распарсено: {total_html_rows}")
+        print(f"   ✅ Уникальных товаров в финале: {len(result_df)}")
+        print(f"   🗑️ Дубликатов удалено: {total_html_rows - len(result_df)}")
+        
         clear_temp_files()
-        print("🗑️ Временные файлы удалены после создания финального Excel.")
+        print("\n🗑️ Временные файлы удалены после создания финального Excel.")
         
     except Exception as e:
         print(f"❌ Ошибка при обработке HTML и создании финального Excel: {e}")
@@ -420,9 +398,8 @@ def scroll_to_load_table_container(page, start_position=0, scroll_step=None, max
     # Финальное сохранение данных
     if data_to_save:
         save_temp_data(data_to_save)
-        merge_temp_to_final()
         save_last_position(scroll_position)
-        print(f"✅ Сбор данных завершен. Всего собрано {len(seen_ids)} уникальных записей.")
+        print(f"✅ Сбор данных завершен. Всего собрано {len(seen_ids)} уникальных HTML строк.")
     
     return len(seen_ids)
 
@@ -539,15 +516,15 @@ def main():
             print("="*60)
             print("📊 НАЧАЛО СБОРА ДАННЫХ")
             print("="*60)
-            total_records = scroll_to_load_table_container(page, start_position)
+            total_html_rows = scroll_to_load_table_container(page, start_position)
             
             print("="*60)
-            print(f"✅ Сбор данных завершен. Всего собрано {total_records} записей.")
+            print(f"✅ Сбор HTML завершен. Собрано {total_html_rows} уникальных HTML строк.")
             print("="*60)
             
-            print("🔄 Начинаем обработку собранных данных...")
+            print("\n🔄 Начинаем обработку собранных данных...")
             process_html_to_excel()
-            print("="*60)
+            print("\n" + "="*60)
             print(f"✅ ПРОГРАММА ЗАВЕРШЕНА УСПЕШНО")
             print(f"📁 Результат сохранен в файл: {FINAL_EXCEL}")
             print("="*60)
@@ -560,10 +537,11 @@ def main():
             import traceback
             traceback.print_exc()
         finally:
-            print("🛑 Закрытие браузера...")
+            print("\n🛑 Закрытие браузера...")
             context.close()
             browser.close()
             print("✅ Браузер закрыт.")
+
 
 
 
