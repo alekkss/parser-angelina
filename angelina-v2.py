@@ -159,6 +159,8 @@ def process_html_to_excel(input_file=None, output_file=None):
             except:
                 return 0.0
         
+        # Парсинг новых данных
+        print("📊 Парсинг HTML данных...")
         for html in html_column:
             soup = BeautifulSoup(html, 'html.parser')
             rows = soup.find_all('tr', id=True)
@@ -197,16 +199,58 @@ def process_html_to_excel(input_file=None, output_file=None):
                     except:
                         data['Вес'].append(0.0)
         
-        result_df = pd.DataFrame(data)
+        # Создание DataFrame с новыми данными
+        new_df = pd.DataFrame(data)
+        print(f"📝 Распарсено {len(new_df)} новых записей")
+        
+        # Проверка существования финального файла и объединение данных
+        if os.path.exists(output_file):
+            print(f"📂 Файл {output_file} уже существует, загружаем...")
+            existing_df = pd.read_excel(output_file, engine='openpyxl')
+            print(f"📋 В существующем файле {len(existing_df)} записей")
+            
+            # Получаем существующие коды номенклатуры
+            existing_codes = set(existing_df['Код номенклатуры'].values)
+            new_codes = set(new_df['Код номенклатуры'].values)
+            
+            # Определяем обновленные и новые записи
+            updated_codes = existing_codes.intersection(new_codes)
+            added_codes = new_codes - existing_codes
+            
+            print(f"🔄 Будет обновлено записей: {len(updated_codes)}")
+            print(f"➕ Будет добавлено новых записей: {len(added_codes)}")
+            
+            # Удаляем из старого DataFrame записи, которые будут обновлены
+            existing_df = existing_df[~existing_df['Код номенклатуры'].isin(updated_codes)]
+            
+            # Объединяем старые (без обновляемых) и новые данные
+            result_df = pd.concat([existing_df, new_df], ignore_index=True)
+            
+            # Удаляем полные дубликаты (на всякий случай)
+            result_df = result_df.drop_duplicates(subset=['Код номенклатуры'], keep='last')
+            
+            print(f"✅ Итого записей в финальном файле: {len(result_df)}")
+        else:
+            print(f"📄 Создается новый файл {output_file}")
+            result_df = new_df
+            # Удаляем дубликаты в новых данных (если есть)
+            result_df = result_df.drop_duplicates(subset=['Код номенклатуры'], keep='last')
+            print(f"✅ Всего записей: {len(result_df)}")
+        
+        # Сортировка по коду номенклатуры для удобства
+        result_df = result_df.sort_values('Код номенклатуры').reset_index(drop=True)
+        
+        # Сохранение результата
         result_df.to_excel(output_file, index=False, engine='openpyxl')
-        print(f"✅ Новая таблица сохранена в {output_file}")
-        print(f"📊 Всего записей: {len(result_df)}")
+        print(f"💾 Таблица сохранена в {output_file}")
         
         clear_temp_files()
-        print("✅ Временные файлы удалены после создания финального Excel.")
+        print("🗑️ Временные файлы удалены после создания финального Excel.")
         
     except Exception as e:
         print(f"❌ Ошибка при обработке HTML и создании финального Excel: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 # --- Функция медленной прокрутки контейнера main_content_container ---
